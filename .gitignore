@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.db
+work/extracted_*
+work/spi_dump_*.bin
+
