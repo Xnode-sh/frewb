@@ -31,6 +31,29 @@ python3 frewb.py report 1 demo-report.md
 из вывода `init`. CLI хранит ссылку на исходный файл, поэтому оставьте его по
 тому же пути до завершения анализа. Отчёт может содержать строки из прошивки.
 
+### Пример отчёта
+
+Для повторения на синтетическом образе в Bash создайте файл командой ниже
+и подставьте его в сценарий выше. Запускайте пример в новой базе проектов
+либо используйте имя проекта и идентификаторы из своего запуска.
+
+```bash
+printf '\001\002\003\000bootcmd=synthetic-demo\000\377' > sample.bin
+```
+
+Фрагмент отчёта, полученного на Linux с `file` и `strings`:
+
+```text
+Image: sample.bin
+Size: 28 bytes
+SHA256: e69c86711a4df35cf777a6e8da60a7b61210da4e3db75bb5a449f020cd81da16
+Interesting String (1)
+0x4: bootcmd=synthetic-demo
+```
+
+Образ состоит из тестовых байтов и контрольной строки. Проверка охватывает
+регистрацию файла, поиск строки по смещению и экспорт отчёта.
+
 ## Установка
 
 ```bash
@@ -97,7 +120,7 @@ frewb list                                   Список проектов
 
 ```
 Projects:  ↑↓ Enter=open  n=new  d=delete  q=quit
-Images:    ↑↓ Enter=analyze  a=add  d=delete  b=back
+Images:    ↑↓ Enter=findings  a=add  d=delete  b=back
 Findings:  ↑↓  b=back  (фильтр по типам: bootloader, kernel, fs, crypto, strings...)
 Symbols:   ↑↓  b=back
 HW:        ↑↓  b=back
