@@ -4,20 +4,18 @@ frewb-tui — Terminal UI for Firmware RE Workbench
 """
 
 import curses
-import sqlite3
-import subprocess
-import os
+import time
+from datetime import datetime
 import sys
 from pathlib import Path
 
-DB_PATH = Path.home() / "frewb" / "frewb.db"
-WORK_DIR = Path.home() / "frewb" / "work"
+from frewb import DB_PATH, WORK_DIR, FirmwareDB, ReportGenerator
 
 class FrewbTUI:
     def __init__(self, stdscr):
         self.stdscr = stdscr
-        self.con = sqlite3.connect(DB_PATH)
-        self.con.row_factory = sqlite3.Row
+        self.db = FirmwareDB()
+        self.con = self.db.con
         self.projects = []
         self.current_project = None
         self.current_image = None
@@ -132,7 +130,7 @@ class FrewbTUI:
             return f"  {item['name']:<30} {item['target_device']:<20} {item['soc']:<15} {item['updated_at'][:19]}"
         elif mode == "images":
             sha = item['sha256'][:16] if item['sha256'] else "N/A"
-            return f"  {Path(item['filename']).name:<40} {sha}  {item['arch']:<8} {item['size']}B"
+            return f"  {Path(item['filename']).name:<40} {sha}  {item['arch'] or 'unknown':<8} {item['size']}B"
         elif mode == "findings":
             return f"  0x{item['offset']:08X}  {item['type']:<20} {item['description'][:60]}"
         elif mode == "symbols":
@@ -145,7 +143,7 @@ class FrewbTUI:
         if self.mode == "projects":
             return "↑↓ Nav | Enter Open | n New | d Delete | q Quit"
         elif self.mode == "images":
-            return "↑↓ Nav | Enter Analyze | a Add | d Delete | b Back | q Quit"
+            return "↑↓ Nav | Enter Findings | a Add | d Delete | b Back | q Quit"
         elif self.mode in ("findings", "symbols", "hw"):
             return "↑↓ Nav | b Back | q Quit"
         return "q Quit"
@@ -269,22 +267,10 @@ class FrewbTUI:
             curses.curs_set(0)
             curses.noecho()
             return
-        filepath = Path(path.strip())
-        if not filepath.exists():
-            self.show_message("File not found")
-            curses.curs_set(0)
-            curses.noecho()
-            return
-        import hashlib
-        sha256 = hashlib.sha256(filepath.read_bytes()).hexdigest()
-        size = filepath.stat().st_size
-        import magic
-        mime = magic.from_file(str(filepath), mime=True)
-        self.con.execute(
-            "INSERT INTO firmware_images (project_id, filename, sha256, size, mime_type, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (self.current_project["id"], filepath.name, sha256, size, mime, datetime.now().isoformat())
-        )
-        self.con.commit()
+        try:
+            self.db.add_image(self.current_project["id"], path.strip())
+        except OSError as exc:
+            self.show_message(str(exc))
         self.load_images()
         curses.curs_set(0)
         curses.noecho()
@@ -304,15 +290,19 @@ class FrewbTUI:
             self.selected = max(0, len(self.get_current_items()) - 1)
 
     def generate_report(self):
-        if self.mode == "projects" and self.current_project:
-            pid = self.current_project["id"]
-        elif self.mode == "images" and self.current_image:
-            pid = self.current_image["project_id"]
+        if self.mode == "projects":
+            if not self.projects or self.selected >= len(self.projects):
+                return
+            project = self.projects[self.selected]
         else:
-            return
-        self.show_message("Generating report...")
-        result = subprocess.run([sys.executable, "-m", "frewb", "report", str(pid)], capture_output=True, text=True)
-        self.show_message(f"Report: {result.stdout.strip() or result.stderr.strip()}")
+            project = self.current_project
+        if project:
+            try:
+                path = ReportGenerator(self.db).generate(project["id"])
+            except OSError as exc:
+                self.show_message(str(exc))
+            else:
+                self.show_message(f"Report: {path}")
 
     def show_message(self, msg):
         h, w = self.stdscr.getmaxyx()
