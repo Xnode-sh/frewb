@@ -76,9 +76,9 @@ class FrewbTUI:
         elif self.mode == "images":
             title = f" FREWB — {self.current_project['name']} — Images "
         elif self.mode == "findings":
-            title = f" FREWB — {self.current_image['filename']} — Findings "
+            title = f" FREWB — {Path(self.current_image['filename']).name} — Findings "
         elif self.mode == "symbols":
-            title = f" FREWB — {self.current_image['filename']} — Symbols "
+            title = f" FREWB — {Path(self.current_image['filename']).name} — Symbols "
         elif self.mode == "hw":
             title = f" FREWB — {self.current_project['name']} — Hardware "
         else:
@@ -132,7 +132,7 @@ class FrewbTUI:
             return f"  {item['name']:<30} {item['target_device']:<20} {item['soc']:<15} {item['updated_at'][:19]}"
         elif mode == "images":
             sha = item['sha256'][:16] if item['sha256'] else "N/A"
-            return f"  {item['filename']:<40} {sha}  {item['arch']:<8} {item['size']}B"
+            return f"  {Path(item['filename']).name:<40} {sha}  {item['arch']:<8} {item['size']}B"
         elif mode == "findings":
             return f"  0x{item['offset']:08X}  {item['type']:<20} {item['description'][:60]}"
         elif mode == "symbols":
