@@ -4,3 +4,8 @@ __pycache__/
 work/extracted_*
 work/spi_dump_*.bin
 
+
+# Secrets
+.env
+.env.*
+!.env.example
