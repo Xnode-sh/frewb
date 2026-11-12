@@ -1,4 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Xnode-sh — RED └•TEAM•┐ lab™
 """
 frewb — Firmware RE Workbench
 Автономный набор инструментов для реверс-инжиниринга прошивок на Android/Termux.
