@@ -12,7 +12,6 @@ import subprocess
 import json
 import sqlite3
 import hashlib
-import magic
 import shutil
 import tempfile
 import threading
@@ -26,12 +25,11 @@ WORK_DIR = Path.home() / "frewb" / "work"
 TOOLS_DIR = Path.home() / "frewb" / "tools"
 
 REQUIRED_TOOLS = [
-    "binwalk", "strings", "xxd", "file", "grep", "awk", "sed",
-    "python3",
+    "strings", "file",
 ]
 
 OPTIONAL_TOOLS = [
-    "qemu-arm-static", "qemu-aarch64-static", "qemu-mips-static", "qemu-mips64-static",
+    "binwalk", "qemu-arm-static", "qemu-aarch64-static", "qemu-mips-static", "qemu-mips64-static",
     "qemu-i386-static", "qemu-x86_64-static",
     "flashrom", "openocd", "arm-none-eabi-objdump", "arm-none-eabi-readelf",
     "ghidra", "ida", "radare2", "firmwalker", "sasquatch", "jefferson"
@@ -132,7 +130,7 @@ class FirmwareDB:
         return cur.lastrowid
 
     def add_image(self, project_id, filepath):
-        path = Path(filepath)
+        path = Path(filepath).expanduser().resolve(strict=True)
         sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
         size = path.stat().st_size
         mime = subprocess.run(["file", "-b", "--mime-type", str(path)], capture_output=True, text=True).stdout.strip()
@@ -140,7 +138,7 @@ class FirmwareDB:
         cur = self.con.execute(
             """INSERT INTO firmware_images (project_id, filename, sha256, size, mime_type, created_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (project_id, path.name, sha256, size, mime, now)
+            (project_id, str(path), sha256, size, mime, now)
         )
         self.con.commit()
         return cur.lastrowid, sha256
@@ -201,24 +199,25 @@ class FirmwareAnalyzer:
     def __init__(self, db):
         self.db = db
 
-    def analyze(self, image_id, filepath):
+    def analyze(self, image_id, filepath, previous_extraction=""):
         path = Path(filepath)
         print(f"[+] Analyzing {path.name}...")
 
-        # 1. binwalk
-        self._run_binwalk(image_id, path)
+        if not path.is_file():
+            raise FileNotFoundError(f"Firmware image not found: {path}")
 
-        # 2. strings
+        binwalk_available = shutil.which("binwalk")
+        if binwalk_available:
+            self._run_binwalk(image_id, path)
+        else:
+            print("  [binwalk] Unavailable. Skipping signatures, entropy and extraction.")
+
         self._run_strings(image_id, path)
+        if binwalk_available:
+            self._run_entropy(image_id, path)
 
-        # 3. entropy
-        self._run_entropy(image_id, path)
-
-        # 4. file/arch detection
         arch, endian, entry, load_addr = self._detect_arch(image_id, path)
-
-        # 5. extract if needed
-        extracted = self._extract_firmware(image_id, path)
+        extracted = self._extract_firmware(image_id, path) if binwalk_available else previous_extraction
 
         self.db.update_image_analysis(image_id, arch, endian, entry, load_addr, extracted)
         print(f"[+] Analysis complete. Arch: {arch}, Endian: {endian}")
@@ -259,7 +258,7 @@ class FirmwareAnalyzer:
         for line in result.stdout.split('\n'):
             if not line.strip():
                 continue
-            parts = line.split(' ', 1)
+            parts = line.split(maxsplit=1)
             if len(parts) == 2:
                 try:
                     offset = int(parts[0], 16)
@@ -451,7 +450,7 @@ class ReportGenerator:
                 f.write(f"  - Notes: {h['notes']}  \n\n")
 
             for img in images:
-                f.write(f"## Image: {img['filename']}\n\n")
+                f.write(f"## Image: {Path(img['filename']).name}\n\n")
                 f.write(f"- SHA256: `{img['sha256']}`  \n")
                 f.write(f"- Size: {img['size']} bytes  \n")
                 f.write(f"- MIME: {img['mime_type']}  \n")
@@ -499,8 +498,7 @@ def main():
     missing = check_tools()
     if missing:
         print(f"[!] Missing required tools: {', '.join(missing)}")
-        print("Install with: pkg install binwalk file grep awk sed python qemu-common flashrom openocd gcc-arm-none-eabi-binutils")
-        return
+        raise SystemExit(1)
 
     db = FirmwareDB()
     analyzer = FirmwareAnalyzer(db)
@@ -537,7 +535,10 @@ def main():
         if not img:
             print("Image not found")
             return
-        analyzer.analyze(img["id"], WORK_DIR / img["filename"] if not Path(img["filename"]).is_absolute() else img["filename"])
+        try:
+            analyzer.analyze(img["id"], WORK_DIR / img["filename"], img["extracted_path"])
+        except FileNotFoundError as exc:
+            raise SystemExit(str(exc)) from exc
 
     elif cmd == "emulate":
         if len(sys.argv) < 4:
